@@ -21,8 +21,21 @@ import {
   UserCheck,
   Calendar,
   Award,
+  PlusCircle,
+  Radio,
+  SlidersHorizontal,
+  ArrowUpRight,
+  Send,
+  HelpCircle,
 } from "lucide-react";
-import { updateLeadStatus, markWhatsAppOpened, reAuditLead, addInteraction } from "@/app/actions";
+import {
+  updateLeadStatus,
+  markWhatsAppOpened,
+  reAuditLead,
+  addInteraction,
+  discoverGooglePlacesAction,
+  quickAddLead,
+} from "@/app/actions";
 
 interface LeadWithRelations {
   id: string;
@@ -44,6 +57,7 @@ interface LeadWithRelations {
   scoreReason: string | null;
   scoreBreakdown: string | null;
   notes: string | null;
+  source: string;
   audit: {
     id: string;
     hasWebsite: boolean;
@@ -108,6 +122,29 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
   const [activeTab, setActiveTab] = useState<"pitch" | "audit" | "score" | "history">("pitch");
   const [quickNote, setQuickNote] = useState("");
 
+  // Modals for live API discovery and quick add
+  const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+
+  // Discovery state
+  const [discoveryQuery, setDiscoveryQuery] = useState("cafes in Zirakpur VIP Road");
+  const [discoveryCity, setDiscoveryCity] = useState("Zirakpur");
+  const [discoveryNiche, setDiscoveryNiche] = useState("Food & Beverage");
+  const [discoveryApiKey, setDiscoveryApiKey] = useState("");
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryMessage, setDiscoveryMessage] = useState<string | null>(null);
+
+  // Quick Add state
+  const [newLeadName, setNewLeadName] = useState("");
+  const [newLeadCategory, setNewLeadCategory] = useState("Café");
+  const [newLeadNiche, setNewLeadNiche] = useState("Food & Beverage");
+  const [newLeadCity, setNewLeadCity] = useState("Zirakpur");
+  const [newLeadArea, setNewLeadArea] = useState("VIP Road");
+  const [newLeadPhone, setNewLeadPhone] = useState("");
+  const [newLeadWebsite, setNewLeadWebsite] = useState("");
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
+  const [quickAddError, setQuickAddError] = useState<string | null>(null);
+
   // Filtered Leads
   const filteredLeads = useMemo(() => {
     return initialLeads.filter((lead) => {
@@ -132,10 +169,8 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
     const encodedText = encodeURIComponent(pitch.openingMessage);
     const waUrl = `https://wa.me/${lead.whatsappPhone}?text=${encodedText}`;
 
-    // Open WhatsApp in new tab / app
     window.open(waUrl, "_blank", "noopener,noreferrer");
 
-    // Mark as contacted in database
     startTransition(async () => {
       await markWhatsAppOpened(lead.id, pitch.id);
     });
@@ -164,182 +199,288 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
     setTimeout(() => setCopiedPitchId(null), 2500);
   };
 
+  const handleRunDiscovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDiscoveryLoading(true);
+    setDiscoveryMessage(null);
+
+    try {
+      const result = await discoverGooglePlacesAction(
+        discoveryQuery,
+        discoveryCity,
+        discoveryNiche,
+        discoveryApiKey
+      );
+      setDiscoveryMessage(
+        `Successfully synced! Found ${result.totalFound} businesses, imported and audited ${result.newImported} new leads.`
+      );
+      setTimeout(() => {
+        if (result.newImported > 0) {
+          setShowDiscoveryModal(false);
+          setDiscoveryMessage(null);
+        }
+      }, 2000);
+    } catch (err: any) {
+      setDiscoveryMessage(`Sync failed: ${err.message}`);
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  const handleQuickAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLeadName.trim()) return;
+    setQuickAddLoading(true);
+    setQuickAddError(null);
+
+    try {
+      await quickAddLead({
+        name: newLeadName.trim(),
+        category: newLeadCategory,
+        niche: newLeadNiche,
+        city: newLeadCity,
+        area: newLeadArea.trim() || undefined,
+        phone: newLeadPhone.trim() || undefined,
+        websiteUrl: newLeadWebsite.trim() || undefined,
+      });
+
+      setNewLeadName("");
+      setNewLeadPhone("");
+      setNewLeadWebsite("");
+      setShowQuickAddModal(false);
+    } catch (err: any) {
+      setQuickAddError(err.message);
+    } finally {
+      setQuickAddLoading(false);
+    }
+  };
+
   const getScoreBadgeColor = (score: number | null) => {
-    if (!score) return "bg-slate-800 text-slate-400 border-slate-700";
-    if (score >= 85) return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-    if (score >= 70) return "bg-amber-500/10 text-amber-400 border-amber-500/30";
-    return "bg-slate-700/30 text-slate-300 border-slate-600/30";
+    if (!score) return "bg-slate-100 text-slate-600 border-slate-200";
+    if (score >= 85) return "bg-emerald-50 text-emerald-800 border-emerald-200/90";
+    if (score >= 70) return "bg-amber-50 text-amber-800 border-amber-200/90";
+    return "bg-slate-100 text-slate-700 border-slate-200";
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "OUTREACH_READY":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">Ready</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            Ready
+          </span>
+        );
       case "CONTACTED":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">Contacted</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+            Contacted
+          </span>
+        );
       case "REPLIED_INTERESTED":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 animate-pulse">Interested 🔥</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-sm animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            Interested 🔥
+          </span>
+        );
       case "MEETING_SCHEDULED":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">Meeting</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            Meeting Booked
+          </span>
+        );
       case "WON":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-500 text-slate-950 font-bold">Client Won 🎉</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-600 text-white shadow-sm">
+            Client Won 🎉
+          </span>
+        );
       case "OPTED_OUT":
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">Opted Out</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
+            Opted Out
+          </span>
+        );
       default:
-        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">{status}</span>;
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+            {status}
+          </span>
+        );
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
-      {/* Top Navbar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-30">
+    <div className="min-h-screen bg-slate-50/80 text-slate-900 pb-20 font-sans">
+      {/* Top Navigation Bar */}
+      <header className="border-b border-slate-200/90 bg-white/95 backdrop-blur sticky top-0 z-30 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-bold text-slate-950 shadow-lg shadow-emerald-500/20">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center font-bold text-white shadow-md shadow-emerald-600/20">
               CB
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-bold tracking-tight text-white text-base">CodeBerry Technologies</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                <span className="font-bold tracking-tight text-slate-900 text-base">
+                  CodeBerry Technologies
+                </span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/90 font-semibold">
                   Sprint Mode
                 </span>
               </div>
-              <p className="text-xs text-slate-400">Target: 1–2 Clients by October 31, 2026 • Dhakoli, Zirakpur & Panchkula</p>
+              <p className="text-xs text-slate-500">
+                Client Acquisition Engine • Target: 1–2 Clients by Oct 31 • Dhakoli, Zirakpur & Panchkula
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <div className="text-right hidden sm:block">
-              <div className="text-xs text-slate-400">Campaign Timeline</div>
-              <div className="text-xs font-semibold text-emerald-400">Oct 19 → Oct 31 (12 Days)</div>
-            </div>
+          <div className="flex items-center space-x-2.5">
+            <button
+              onClick={() => setShowQuickAddModal(true)}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors"
+            >
+              <PlusCircle className="w-3.5 h-3.5 text-slate-600" />
+              <span className="hidden sm:inline">Add Business</span>
+            </button>
+
+            <button
+              onClick={() => setShowDiscoveryModal(true)}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-colors"
+            >
+              <Radio className="w-3.5 h-3.5 animate-pulse" />
+              <span>Live API Sync</span>
+            </button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
         {/* KPI Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-slate-400 flex items-center justify-between">
-              <span>Total Leads</span>
-              <Building2 className="w-3.5 h-3.5 text-slate-500" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-semibold text-slate-500 flex items-center justify-between">
+              <span>Total Pipeline</span>
+              <Building2 className="w-3.5 h-3.5 text-slate-400" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-white">{stats.totalLeads}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">20 F&B • 6 Salons</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{stats.totalLeads}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Audited & verified</div>
           </div>
 
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-slate-400 flex items-center justify-between">
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-semibold text-slate-500 flex items-center justify-between">
               <span>High Priority (80+)</span>
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-emerald-400">{stats.highPriority}</div>
-            <div className="text-[11px] text-emerald-500/80 mt-0.5">Prime candidates</div>
+            <div className="mt-2 text-2xl font-bold text-emerald-600">{stats.highPriority}</div>
+            <div className="text-[11px] text-emerald-700 font-medium mt-0.5">Prime conversion candidates</div>
           </div>
 
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-slate-400 flex items-center justify-between">
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-semibold text-slate-500 flex items-center justify-between">
               <span>Outreach Ready</span>
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-blue-400">{stats.outreachReady}</div>
-            <div className="text-[11px] text-blue-500/80 mt-0.5">Audited & drafted</div>
+            <div className="mt-2 text-2xl font-bold text-blue-600">{stats.outreachReady}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Custom draft prepared</div>
           </div>
 
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-slate-400 flex items-center justify-between">
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-semibold text-slate-500 flex items-center justify-between">
               <span>Contacted</span>
-              <MessageCircle className="w-3.5 h-3.5 text-purple-400" />
+              <MessageCircle className="w-3.5 h-3.5 text-purple-600" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-purple-400">{stats.contacted}</div>
-            <div className="text-[11px] text-purple-500/80 mt-0.5">WhatsApp opened</div>
+            <div className="mt-2 text-2xl font-bold text-purple-600">{stats.contacted}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">WhatsApp drafts opened</div>
           </div>
 
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-slate-400 flex items-center justify-between">
-              <span>Interested / Calls</span>
-              <PhoneCall className="w-3.5 h-3.5 text-amber-400" />
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-semibold text-slate-500 flex items-center justify-between">
+              <span>Interest / Calls</span>
+              <PhoneCall className="w-3.5 h-3.5 text-amber-600" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-amber-400">{stats.interested + stats.meetings}</div>
-            <div className="text-[11px] text-amber-500/80 mt-0.5">Qualified pipeline</div>
+            <div className="mt-2 text-2xl font-bold text-amber-600">
+              {stats.interested + stats.meetings}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Active prospects</div>
           </div>
 
-          <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3.5 shadow-sm">
-            <div className="text-xs font-medium text-emerald-300 flex items-center justify-between">
-              <span>Paying Clients</span>
-              <Award className="w-3.5 h-3.5 text-emerald-400" />
+          <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 shadow-2xs">
+            <div className="text-xs font-bold text-emerald-900 flex items-center justify-between">
+              <span>Target Goal</span>
+              <Award className="w-3.5 h-3.5 text-emerald-600" />
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-emerald-400">{stats.won} / 2</div>
-            <div className="text-[11px] text-emerald-400/80 mt-0.5">Target: ₹15k–₹25k</div>
+            <div className="mt-2 text-2xl font-black text-emerald-700">
+              {stats.won} / 2
+            </div>
+            <div className="text-[11px] font-semibold text-emerald-800 mt-0.5">
+              Goal: ₹15k–₹25k by Oct 31
+            </div>
           </div>
         </div>
 
         {/* Search & Filter Toolbar */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-3">
+        <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs space-y-3">
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative w-full sm:w-96">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search business, area, or phone..."
+                placeholder="Search by business name, street, or phone..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
               />
             </div>
 
-            {/* Quick Filter Buttons */}
+            {/* Quick Filter Selectors */}
             <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center">
-              {/* Category */}
               <select
                 value={selectedNiche}
                 onChange={(e) => setSelectedNiche(e.target.value)}
-                className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:border-emerald-500"
               >
                 <option value="ALL">All Niches</option>
                 <option value="Food & Beverage">Food & Beverage (Cafés/Restaurants)</option>
                 <option value="Beauty & Wellness">Beauty & Wellness (Salons/Spas)</option>
               </select>
 
-              {/* City */}
               <select
                 value={selectedCity}
                 onChange={(e) => setSelectedCity(e.target.value)}
-                className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:border-emerald-500"
               >
                 <option value="ALL">All Cities</option>
                 <option value="Zirakpur">Zirakpur</option>
                 <option value="Panchkula">Panchkula</option>
               </select>
 
-              {/* Status */}
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:border-emerald-500"
               >
                 <option value="ALL">All Statuses</option>
                 <option value="OUTREACH_READY">Outreach Ready</option>
                 <option value="CONTACTED">Contacted</option>
                 <option value="REPLIED_INTERESTED">Interested</option>
-                <option value="MEETING_SCHEDULED">Meeting</option>
-                <option value="WON">Won</option>
+                <option value="MEETING_SCHEDULED">Meeting Booked</option>
+                <option value="WON">Won Client</option>
               </select>
             </div>
           </div>
         </div>
 
-        {/* Lead Table / Cards */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-          <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Showing {filteredLeads.length} qualified prospects</span>
-            <span className="hidden sm:inline">Ranked by Lead Score & Verified Needs</span>
+        {/* Lead Table / List */}
+        <div className="bg-white border border-slate-200/90 rounded-xl overflow-hidden shadow-2xs">
+          <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between text-xs font-medium text-slate-500">
+            <span>Showing {filteredLeads.length} verified businesses</span>
+            <span className="hidden sm:inline">Ranked by Transparent Opportunity Score (0–100)</span>
           </div>
 
-          <div className="divide-y divide-slate-800/80">
+          <div className="divide-y divide-slate-100">
             {filteredLeads.map((lead) => {
               const audit = lead.audit;
               const pitch = lead.pitches[0];
@@ -348,80 +489,84 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
               return (
                 <div
                   key={lead.id}
-                  className="p-4 hover:bg-slate-800/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  className="p-4 sm:p-5 hover:bg-slate-50/70 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
                 >
                   {/* Left Column: Business Info */}
                   <div className="flex-1 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold text-white text-base hover:text-emerald-400 transition-colors">
+                      <h3 className="font-bold text-slate-900 text-base hover:text-emerald-700 transition-colors">
                         {lead.name}
                       </h3>
                       {getStatusBadge(lead.status)}
-                      <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
                         {lead.category}
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
                       <span className="flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
                         {lead.area ? `${lead.area}, ${lead.city}` : lead.city}
                       </span>
+
                       {lead.rating && (
-                        <span className="flex items-center gap-1 text-amber-400">
-                          <Star className="w-3.5 h-3.5 fill-amber-400" />
+                        <span className="flex items-center gap-1 font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60">
+                          <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
                           {lead.rating} ({lead.reviewCount || 0} reviews)
                         </span>
                       )}
+
                       <span>
                         {lead.websiteUrl ? (
                           <a
                             href={lead.websiteUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-blue-400 hover:underline flex items-center gap-1"
+                            className="text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1 font-medium"
                           >
-                            <ExternalLink className="w-3 h-3" />
+                            <ExternalLink className="w-3 h-3 text-emerald-600" />
                             {lead.websiteUrl.replace(/^https?:\/\//, "")}
                           </a>
                         ) : (
-                          <span className="text-slate-500 italic">No Website Found</span>
+                          <span className="text-slate-400 italic">No Independent Website</span>
                         )}
                       </span>
                     </div>
 
-                    {/* Verified Issue / Opportunity Tag */}
-                    <div className="text-xs text-slate-300 flex items-start gap-1.5 mt-1 bg-slate-950/60 p-2 rounded-lg border border-slate-800/60">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    {/* Verified Issue / Opportunity Banner */}
+                    <div className="text-xs text-slate-700 flex items-start gap-2 mt-1.5 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200/70">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                       <div>
-                        <span className="font-medium text-slate-200">
+                        <span className="font-semibold text-slate-900">
                           {issues.length > 0 ? issues[0] : "No direct WhatsApp conversion link"}
                         </span>
                         {pitch && (
-                          <span className="text-slate-400 block mt-0.5">
-                            Offer: <span className="text-emerald-400">{pitch.recommendedService}</span> ({pitch.pricePoint || "₹8,999"})
+                          <span className="text-slate-600 block mt-0.5">
+                            Recommended: <span className="font-semibold text-emerald-800">{pitch.recommendedService}</span> ({pitch.pricePoint || "₹8,999"})
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Middle Column: Score Indicator */}
-                  <div className="flex items-center gap-3 shrink-0">
+                  {/* Middle Column: Score Badge */}
+                  <div className="flex items-center gap-3.5 shrink-0">
                     <div
-                      className={`px-3 py-2 rounded-xl border flex flex-col items-center justify-center min-w-[70px] ${getScoreBadgeColor(
+                      className={`px-3.5 py-2 rounded-xl border flex flex-col items-center justify-center min-w-[76px] shadow-2xs ${getScoreBadgeColor(
                         lead.leadScore
                       )}`}
                     >
-                      <span className="text-lg font-bold leading-tight">{lead.leadScore || "N/A"}</span>
-                      <span className="text-[10px] uppercase font-semibold tracking-wider">Score</span>
+                      <span className="text-xl font-black leading-tight tracking-tight">
+                        {lead.leadScore || "N/A"}
+                      </span>
+                      <span className="text-[10px] uppercase font-bold tracking-wider">Score</span>
                     </div>
 
                     {/* Right Column: Actions */}
                     <div className="flex flex-row md:flex-col gap-2 shrink-0">
                       <button
                         onClick={() => handleOpenWhatsApp(lead)}
-                        className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/10 transition-colors"
+                        className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                       >
                         <MessageCircle className="w-3.5 h-3.5 fill-current" />
                         <span>Open WhatsApp</span>
@@ -432,10 +577,10 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                           setSelectedLead(lead);
                           setActiveTab("pitch");
                         }}
-                        className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1 border border-slate-700 transition-colors"
+                        className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1 border border-slate-300 shadow-2xs transition-colors"
                       >
                         <span>Audit & Pitch</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                       </button>
                     </div>
                   </div>
@@ -446,94 +591,95 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
         </div>
       </main>
 
-      {/* Slide-over / Modal for Lead Detail, Audit & Pitch Review */}
+      {/* Slide-over Modal for Lead Detail, Audit & Pitch Review */}
       {selectedLead && (
-        <div className="fixed inset-0 z-50 overflow-hidden bg-black/70 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-2xl bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs flex justify-end animate-in fade-in duration-150">
+          <div className="w-full max-w-2xl bg-white border-l border-slate-200 h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
             {/* Modal Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-bold text-white">{selectedLead.name}</h2>
+                  <h2 className="text-lg font-bold text-slate-900">{selectedLead.name}</h2>
                   {getStatusBadge(selectedLead.status)}
                 </div>
-                <p className="text-xs text-slate-400">
-                  {selectedLead.category} • {selectedLead.area}, {selectedLead.city} • Phone: {selectedLead.phone || "N/A"}
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedLead.category} • {selectedLead.area}, {selectedLead.city} • Phone:{" "}
+                  <span className="font-semibold text-slate-700">{selectedLead.phone || "N/A"}</span>
                 </p>
               </div>
               <button
                 onClick={() => setSelectedLead(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex border-b border-slate-800 px-4 bg-slate-950/40 text-xs">
+            <div className="flex border-b border-slate-200 px-5 bg-white text-xs">
               <button
                 onClick={() => setActiveTab("pitch")}
-                className={`py-2.5 px-3 border-b-2 font-medium transition-colors ${
+                className={`py-3 px-3.5 border-b-2 font-bold transition-colors ${
                   activeTab === "pitch"
-                    ? "border-emerald-500 text-emerald-400"
-                    : "border-transparent text-slate-400 hover:text-slate-200"
+                    ? "border-emerald-600 text-emerald-700"
+                    : "border-transparent text-slate-500 hover:text-slate-900"
                 }`}
               >
                 Sales Pitch & WhatsApp
               </button>
               <button
                 onClick={() => setActiveTab("audit")}
-                className={`py-2.5 px-3 border-b-2 font-medium transition-colors ${
+                className={`py-3 px-3.5 border-b-2 font-bold transition-colors ${
                   activeTab === "audit"
-                    ? "border-emerald-500 text-emerald-400"
-                    : "border-transparent text-slate-400 hover:text-slate-200"
+                    ? "border-emerald-600 text-emerald-700"
+                    : "border-transparent text-slate-500 hover:text-slate-900"
                 }`}
               >
-                Website & Business Audit
+                Website Audit
               </button>
               <button
                 onClick={() => setActiveTab("score")}
-                className={`py-2.5 px-3 border-b-2 font-medium transition-colors ${
+                className={`py-3 px-3.5 border-b-2 font-bold transition-colors ${
                   activeTab === "score"
-                    ? "border-emerald-500 text-emerald-400"
-                    : "border-transparent text-slate-400 hover:text-slate-200"
+                    ? "border-emerald-600 text-emerald-700"
+                    : "border-transparent text-slate-500 hover:text-slate-900"
                 }`}
               >
-                Score Breakdown ({selectedLead.leadScore}/100)
+                Score ({selectedLead.leadScore}/100)
               </button>
               <button
                 onClick={() => setActiveTab("history")}
-                className={`py-2.5 px-3 border-b-2 font-medium transition-colors ${
+                className={`py-3 px-3.5 border-b-2 font-bold transition-colors ${
                   activeTab === "history"
-                    ? "border-emerald-500 text-emerald-400"
-                    : "border-transparent text-slate-400 hover:text-slate-200"
+                    ? "border-emerald-600 text-emerald-700"
+                    : "border-transparent text-slate-500 hover:text-slate-900"
                 }`}
               >
                 History ({selectedLead.interactions?.length || 0})
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {/* TAB 1: PITCH & WHATSAPP */}
               {activeTab === "pitch" && (
                 <div className="space-y-4">
                   {selectedLead.pitches[0] ? (
                     <>
                       {/* Offer Summary Card */}
-                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                      <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
+                          <span className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
                             Recommended Offer
                           </span>
-                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                            {selectedLead.pitches[0].pricePoint || "₹8,999"} • 48-Hour Delivery
+                          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white text-emerald-700 border border-emerald-300 shadow-2xs">
+                            {selectedLead.pitches[0].pricePoint || "₹8,999"} • 48-Hour Turnaround
                           </span>
                         </div>
-                        <div className="text-sm font-semibold text-white">
+                        <div className="text-sm font-bold text-slate-900">
                           {selectedLead.pitches[0].recommendedService}
                         </div>
-                        <div className="text-xs text-slate-400">
+                        <div className="text-xs text-slate-600">
                           {selectedLead.pitches[0].suggestedOffer}
                         </div>
                       </div>
@@ -541,7 +687,7 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                       {/* Opening Message Box */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="text-xs font-semibold text-slate-300">
+                          <label className="text-xs font-bold text-slate-700">
                             Personalized WhatsApp Opening Message
                           </label>
                           <button
@@ -551,12 +697,12 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                                 selectedLead.pitches[0].id
                               )
                             }
-                            className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition-colors"
+                            className="text-xs text-slate-600 hover:text-emerald-700 flex items-center gap-1 font-semibold transition-colors"
                           >
                             {copiedPitchId === selectedLead.pitches[0].id ? (
                               <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Copied!</span>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-emerald-700">Copied to clipboard!</span>
                               </>
                             ) : (
                               <>
@@ -566,28 +712,28 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                             )}
                           </button>
                         </div>
-                        <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans shadow-2xs">
                           {selectedLead.pitches[0].openingMessage}
                         </div>
 
-                        {/* Action Buttons */}
+                        {/* Send Button */}
                         <div className="pt-2 flex flex-col sm:flex-row gap-2">
                           <button
                             onClick={() => handleOpenWhatsApp(selectedLead)}
-                            className="flex-1 py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-colors"
+                            className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.01]"
                           >
                             <MessageCircle className="w-4 h-4 fill-current" />
-                            <span>Open in WhatsApp (Send Outreach)</span>
+                            <span>Open in WhatsApp (Pre-fills Text)</span>
                           </button>
                         </div>
                       </div>
 
                       {/* Follow-up Message */}
                       <div className="space-y-1.5 pt-2">
-                        <label className="text-xs font-semibold text-slate-400">
+                        <label className="text-xs font-bold text-slate-700">
                           Day 3 Polite Follow-Up (If no reply)
                         </label>
-                        <div className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-lg text-xs text-slate-300 whitespace-pre-wrap">
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 whitespace-pre-wrap">
                           {selectedLead.pitches[0].followUpMessage}
                         </div>
                       </div>
@@ -595,8 +741,8 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                       {/* Objection Handling Cheat Sheet */}
                       {selectedLead.pitches[0].likelyObjections && (
                         <div className="space-y-2 pt-2">
-                          <label className="text-xs font-semibold text-amber-400 flex items-center gap-1">
-                            <Sparkles className="w-3.5 h-3.5" />
+                          <label className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
                             Founder Objection Cheat Sheet
                           </label>
                           <div className="space-y-2">
@@ -604,12 +750,12 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                               (item: { objection: string; response: string }, idx: number) => (
                                 <div
                                   key={idx}
-                                  className="p-3 bg-slate-950/90 border border-slate-800 rounded-lg text-xs space-y-1"
+                                  className="p-3 bg-amber-50/50 border border-amber-200 rounded-lg text-xs space-y-1"
                                 >
-                                  <div className="font-medium text-amber-300">
+                                  <div className="font-bold text-amber-900">
                                     Q: &ldquo;{item.objection}&rdquo;
                                   </div>
-                                  <div className="text-slate-300 pl-3 border-l-2 border-emerald-500/40">
+                                  <div className="text-slate-700 pl-3 border-l-2 border-emerald-600">
                                     {item.response}
                                   </div>
                                 </div>
@@ -620,7 +766,7 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                       )}
                     </>
                   ) : (
-                    <div className="text-center py-8 text-slate-500 text-xs">
+                    <div className="text-center py-8 text-slate-400 text-xs">
                       No pitch generated yet.
                     </div>
                   )}
@@ -632,46 +778,46 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                 <div className="space-y-4">
                   {selectedLead.audit ? (
                     <>
-                      <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                        <div className="text-xs font-semibold text-slate-300">Audit Executive Summary</div>
-                        <p className="text-xs text-slate-300 leading-relaxed">
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 shadow-2xs">
+                        <div className="text-xs font-bold text-slate-800">Executive Summary</div>
+                        <p className="text-xs text-slate-700 leading-relaxed">
                           {selectedLead.audit.auditSummary}
                         </p>
                       </div>
 
                       {/* Technical Check Grid */}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                          <span className="text-slate-400 block text-[11px]">Website Status</span>
-                          <span className="font-semibold text-white">
+                      <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs">
+                          <span className="text-slate-500 block text-[11px] font-medium">Website Status</span>
+                          <span className="font-bold text-slate-900">
                             {selectedLead.audit.hasWebsite
                               ? selectedLead.audit.isAccessible
                                 ? `Active (HTTP ${selectedLead.audit.statusCode})`
-                                : `Broken / Inaccessible`
+                                : `Broken / Error`
                               : "No Website"}
                           </span>
                         </div>
-                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                          <span className="text-slate-400 block text-[11px]">Server Response Time</span>
-                          <span className="font-semibold text-white">
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs">
+                          <span className="text-slate-500 block text-[11px] font-medium">Server Response Time</span>
+                          <span className="font-bold text-slate-900">
                             {selectedLead.audit.loadTimeMs ? `${selectedLead.audit.loadTimeMs} ms` : "N/A"}
                           </span>
                         </div>
-                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                          <span className="text-slate-400 block text-[11px]">Mobile Optimized Viewport</span>
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs">
+                          <span className="text-slate-500 block text-[11px] font-medium">Mobile Viewport</span>
                           <span
-                            className={`font-semibold ${
-                              selectedLead.audit.isMobileResponsive ? "text-emerald-400" : "text-red-400"
+                            className={`font-bold ${
+                              selectedLead.audit.isMobileResponsive ? "text-emerald-700" : "text-rose-600"
                             }`}
                           >
                             {selectedLead.audit.isMobileResponsive ? "Configured ✓" : "Missing ✗"}
                           </span>
                         </div>
-                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                          <span className="text-slate-400 block text-[11px]">Direct WhatsApp Action</span>
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs">
+                          <span className="text-slate-500 block text-[11px] font-medium">WhatsApp Conversion</span>
                           <span
-                            className={`font-semibold ${
-                              selectedLead.audit.hasWhatsAppWidget ? "text-emerald-400" : "text-amber-400"
+                            className={`font-bold ${
+                              selectedLead.audit.hasWhatsAppWidget ? "text-emerald-700" : "text-amber-700"
                             }`}
                           >
                             {selectedLead.audit.hasWhatsAppWidget ? "Present ✓" : "Missing ✗"}
@@ -679,17 +825,17 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                         </div>
                       </div>
 
-                      {/* Identified Issues */}
+                      {/* Verified Issues */}
                       <div className="space-y-1.5">
-                        <div className="text-xs font-semibold text-slate-300">Verified Issues</div>
-                        <div className="space-y-1">
+                        <div className="text-xs font-bold text-slate-800">Verified Issues</div>
+                        <div className="space-y-1.5">
                           {JSON.parse(selectedLead.audit.identifiedIssues || "[]").map(
                             (issue: string, idx: number) => (
                               <div
                                 key={idx}
-                                className="flex items-center gap-2 p-2 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-slate-300"
+                                className="flex items-center gap-2 p-2.5 bg-rose-50/70 border border-rose-200 rounded-lg text-xs text-rose-900 font-medium"
                               >
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                                 <span>{issue}</span>
                               </div>
                             )
@@ -699,15 +845,15 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
 
                       {/* Opportunities */}
                       <div className="space-y-1.5">
-                        <div className="text-xs font-semibold text-slate-300">Revenue Opportunities</div>
-                        <div className="space-y-1">
+                        <div className="text-xs font-bold text-slate-800">Growth Opportunities</div>
+                        <div className="space-y-1.5">
                           {JSON.parse(selectedLead.audit.opportunities || "[]").map(
                             (opp: string, idx: number) => (
                               <div
                                 key={idx}
-                                className="flex items-center gap-2 p-2 bg-emerald-950/20 border border-emerald-900/30 rounded-lg text-xs text-emerald-300"
+                                className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 font-medium"
                               >
-                                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 <span>{opp}</span>
                               </div>
                             )
@@ -716,7 +862,7 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-8 text-slate-500 text-xs">No audit data available.</div>
+                    <div className="text-center py-8 text-slate-400 text-xs">No audit data available.</div>
                   )}
                 </div>
               )}
@@ -724,14 +870,14 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
               {/* TAB 3: SCORE BREAKDOWN */}
               {activeTab === "score" && (
                 <div className="space-y-4">
-                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 shadow-2xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-400">Lead Score Calculation</span>
-                      <span className="text-lg font-bold text-emerald-400">
+                      <span className="text-xs font-bold text-slate-600">Total Score Calculation</span>
+                      <span className="text-xl font-black text-emerald-700">
                         {selectedLead.leadScore || 0} / 100
                       </span>
                     </div>
-                    <p className="text-xs text-slate-300">{selectedLead.scoreReason}</p>
+                    <p className="text-xs text-slate-700">{selectedLead.scoreReason}</p>
                   </div>
 
                   {selectedLead.scoreBreakdown && (
@@ -740,21 +886,21 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                         const breakdown = JSON.parse(selectedLead.scoreBreakdown);
                         return (
                           <>
-                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
-                              <span className="text-slate-400">Need & Identified Deficiencies</span>
-                              <span className="font-bold text-white">{breakdown.needScore} / 40 pts</span>
+                            <div className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-2xs">
+                              <span className="text-slate-600 font-medium">Need & Identified Deficiencies</span>
+                              <span className="font-bold text-slate-900">{breakdown.needScore} / 40 pts</span>
                             </div>
-                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
-                              <span className="text-slate-400">Business Activity & Customer Rating</span>
-                              <span className="font-bold text-white">{breakdown.activityScore} / 30 pts</span>
+                            <div className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-2xs">
+                              <span className="text-slate-600 font-medium">Business Activity & Customer Rating</span>
+                              <span className="font-bold text-slate-900">{breakdown.activityScore} / 30 pts</span>
                             </div>
-                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
-                              <span className="text-slate-400">Service Match (WhatsApp Menu / Booking)</span>
-                              <span className="font-bold text-white">{breakdown.serviceMatchScore} / 20 pts</span>
+                            <div className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-2xs">
+                              <span className="text-slate-600 font-medium">Service Match (WhatsApp Menu / Booking)</span>
+                              <span className="font-bold text-slate-900">{breakdown.serviceMatchScore} / 20 pts</span>
                             </div>
-                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
-                              <span className="text-slate-400">Contactability (WhatsApp/Phone Verified)</span>
-                              <span className="font-bold text-white">{breakdown.contactabilityScore} / 10 pts</span>
+                            <div className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-2xs">
+                              <span className="text-slate-600 font-medium">Contactability (WhatsApp/Phone Verified)</span>
+                              <span className="font-bold text-slate-900">{breakdown.contactabilityScore} / 10 pts</span>
                             </div>
                           </>
                         );
@@ -764,22 +910,22 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                 </div>
               )}
 
-              {/* TAB 4: INTERACTION HISTORY & QUICK NOTES */}
+              {/* TAB 4: HISTORY & NOTES */}
               {activeTab === "history" && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300">Add Log Note / Next Action</label>
+                    <label className="text-xs font-bold text-slate-800">Add Log Note / Next Action</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
-                        placeholder="e.g. Owner called back, wants to see demo on Friday 4 PM..."
+                        placeholder="e.g. Spoke to owner on WhatsApp, requested live demo on Zoom..."
                         value={quickNote}
                         onChange={(e) => setQuickNote(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                        className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                       />
                       <button
                         onClick={() => handleAddNote(selectedLead.id)}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg text-slate-200 transition-colors"
+                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-xs font-semibold rounded-lg text-white transition-colors"
                       >
                         Add Note
                       </button>
@@ -787,24 +933,24 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
                   </div>
 
                   <div className="space-y-2 pt-2">
-                    <div className="text-xs font-semibold text-slate-400">Interaction Timeline</div>
+                    <div className="text-xs font-bold text-slate-700">Interaction Timeline</div>
                     {selectedLead.interactions && selectedLead.interactions.length > 0 ? (
                       <div className="space-y-2">
                         {selectedLead.interactions.map((item) => (
                           <div
                             key={item.id}
-                            className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg text-xs space-y-1"
+                            className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1 shadow-2xs"
                           >
                             <div className="flex items-center justify-between text-[11px] text-slate-500">
-                              <span className="font-medium text-emerald-400">{item.type}</span>
+                              <span className="font-bold text-emerald-700">{item.type}</span>
                               <span>{new Date(item.createdAt).toLocaleString()}</span>
                             </div>
-                            <div className="text-slate-300">{item.content}</div>
+                            <div className="text-slate-800">{item.content}</div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="text-center py-6 text-slate-600 text-xs">
+                      <div className="text-center py-6 text-slate-400 text-xs">
                         No activity recorded yet.
                       </div>
                     )}
@@ -813,38 +959,308 @@ export default function DashboardClient({ initialLeads, stats }: Props) {
               )}
 
               {/* Quick Pipeline Transition Bar */}
-              <div className="border-t border-slate-800 pt-4 space-y-2">
-                <span className="text-xs font-semibold text-slate-400 block">
+              <div className="border-t border-slate-200 pt-4 space-y-2">
+                <span className="text-xs font-bold text-slate-700 block">
                   Update Lead Pipeline Stage
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     onClick={() => handleStatusChange(selectedLead.id, "CONTACTED")}
-                    className="py-1.5 px-2 rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 text-xs font-medium transition-colors"
+                    className="py-1.5 px-2 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-semibold transition-colors"
                   >
                     Mark Contacted
                   </button>
                   <button
                     onClick={() => handleStatusChange(selectedLead.id, "REPLIED_INTERESTED")}
-                    className="py-1.5 px-2 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-medium transition-colors"
+                    className="py-1.5 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition-colors"
                   >
                     Interested 🔥
                   </button>
                   <button
                     onClick={() => handleStatusChange(selectedLead.id, "MEETING_SCHEDULED")}
-                    className="py-1.5 px-2 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors"
+                    className="py-1.5 px-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold transition-colors"
                   >
                     Meeting Booked
                   </button>
                   <button
                     onClick={() => handleStatusChange(selectedLead.id, "WON")}
-                    className="py-1.5 px-2 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-colors"
+                    className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-colors"
                   >
                     Won Client 🎉
                   </button>
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Google Places API Sync Modal */}
+      {showDiscoveryModal && (
+        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-emerald-50 text-emerald-700">
+                  <Radio className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Live Google Places API Discovery</h3>
+                  <p className="text-xs text-slate-500">Fetch, audit, and score real businesses via official Google Places API</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDiscoveryModal(false)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRunDiscovery} className="space-y-3.5 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Search Query</label>
+                <input
+                  type="text"
+                  value={discoveryQuery}
+                  onChange={(e) => setDiscoveryQuery(e.target.value)}
+                  placeholder="e.g. cafes in Zirakpur VIP Road, salons in Panchkula Sector 9"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Target City</label>
+                  <select
+                    value={discoveryCity}
+                    onChange={(e) => setDiscoveryCity(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Zirakpur">Zirakpur</option>
+                    <option value="Dhakoli">Dhakoli</option>
+                    <option value="Panchkula">Panchkula</option>
+                    <option value="Chandigarh">Chandigarh</option>
+                    <option value="Mohali">Mohali</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Niche Category</label>
+                  <select
+                    value={discoveryNiche}
+                    onChange={(e) => setDiscoveryNiche(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Food & Beverage">Food & Beverage (Café/Diner)</option>
+                    <option value="Beauty & Wellness">Beauty & Wellness (Salon/Spa)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">
+                  Google Places API Key <span className="text-slate-400 font-normal">(Optional if set in .env)</span>
+                </label>
+                <input
+                  type="password"
+                  value={discoveryApiKey}
+                  onChange={(e) => setDiscoveryApiKey(e.target.value)}
+                  placeholder="Paste AIzaSy... or leave empty to use GOOGLE_API_KEY from .env"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              {discoveryMessage && (
+                <div
+                  className={`p-3 rounded-lg text-xs font-medium ${
+                    discoveryMessage.startsWith("Success")
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      : "bg-rose-50 text-rose-800 border border-rose-200"
+                  }`}
+                >
+                  {discoveryMessage}
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDiscoveryModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={discoveryLoading}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 disabled:opacity-50"
+                >
+                  {discoveryLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Syncing & Auditing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Discover & Audit Leads</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Add Business Modal */}
+      {showQuickAddModal && (
+        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-blue-50 text-blue-700">
+                  <PlusCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Quick Add Local Business</h3>
+                  <p className="text-xs text-slate-500">Instantly add any local prospect to audit and draft outreach</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowQuickAddModal(false)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAdd} className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Business Name *</label>
+                <input
+                  type="text"
+                  value={newLeadName}
+                  onChange={(e) => setNewLeadName(e.target.value)}
+                  placeholder="e.g. Blue Tokai Coffee Roasters"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Category</label>
+                  <input
+                    type="text"
+                    value={newLeadCategory}
+                    onChange={(e) => setNewLeadCategory(e.target.value)}
+                    placeholder="Café, Bakery, Salon"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Niche</label>
+                  <select
+                    value={newLeadNiche}
+                    onChange={(e) => setNewLeadNiche(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Food & Beverage">Food & Beverage</option>
+                    <option value="Beauty & Wellness">Beauty & Wellness</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">City</label>
+                  <select
+                    value={newLeadCity}
+                    onChange={(e) => setNewLeadCity(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Zirakpur">Zirakpur</option>
+                    <option value="Dhakoli">Dhakoli</option>
+                    <option value="Panchkula">Panchkula</option>
+                    <option value="Chandigarh">Chandigarh</option>
+                    <option value="Mohali">Mohali</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Area / Sector</label>
+                  <input
+                    type="text"
+                    value={newLeadArea}
+                    onChange={(e) => setNewLeadArea(e.target.value)}
+                    placeholder="e.g. VIP Road, Sec 9"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Phone / WhatsApp</label>
+                  <input
+                    type="text"
+                    value={newLeadPhone}
+                    onChange={(e) => setNewLeadPhone(e.target.value)}
+                    placeholder="e.g. +91 98888 12345"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Website URL (Optional)</label>
+                  <input
+                    type="text"
+                    value={newLeadWebsite}
+                    onChange={(e) => setNewLeadWebsite(e.target.value)}
+                    placeholder="e.g. https://example.com"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {quickAddError && (
+                <div className="p-2.5 bg-rose-50 text-rose-800 border border-rose-200 rounded-lg text-xs font-medium">
+                  {quickAddError}
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickAddModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={quickAddLoading}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 disabled:opacity-50"
+                >
+                  {quickAddLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Auditing & Adding...</span>
+                    </>
+                  ) : (
+                    <>
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>Add & Run Audit</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
