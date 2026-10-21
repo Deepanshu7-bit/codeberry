@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id             String         @id @default(auto()) @map("_id") @db.ObjectId
+  name           String
+  category       String         // "School", "Hospital", "Café", "Bakery", "Small Business", "Agency"
+  niche          String         // "Education", "Healthcare", "Food & Beverage", "Retail", "Services"
+  address        String
+  city           String
+  area           String?
+  phone          String?
+  whatsappPhone  String?        // E.164 formatted number without + for wa.me links
+  email          String?
+  websiteUrl     String?
+  googleMapsUrl  String?
+  rating         Float?
+  reviewCount    Int?
+  source         String         @default("Manual / Directory")
+  status         String         @default("DISCOVERED") // DISCOVERED, AUDITED, QUALIFIED, OUTREACH_READY, CONTACTED, REPLIED_INTERESTED, MEETING_SCHEDULED, WON, LOST, OPTED_OUT
+  leadScore      Int?           // 0 to 100
+  scoreReason    String?
+  scoreBreakdown String?        // JSON of score components
+  notes          String?
+  audit          Audit?
+  pitches        PitchDraft[]
+  interactions   Interaction[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Audit {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  leadId             String   @unique @db.ObjectId
+  lead               Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  hasWebsite         Boolean  @default(false)
+  isAccessible       Boolean  @default(false)
+  statusCode         Int?
+  loadTimeMs         Int?
+  isMobileResponsive Boolean  @default(false)
+  hasSsl             Boolean  @default(false)
+  hasMetaTags        Boolean  @default(false)
+  title              String?
+  metaDescription    String?
+  hasOnlineOrdering  Boolean  @default(false)
+  hasBookingSystem   Boolean  @default(false)
+  hasWhatsAppWidget  Boolean  @default(false)
+  hasSocialLinks     Boolean  @default(false)
+  socialLinks        String?  // JSON string array
+  identifiedIssues   String   // JSON string array of specific verified issues
+  opportunities      String?  // JSON string array of concrete growth opportunities
+  auditSummary       String   // Concise executive summary
+  rawAuditData       String?  // JSON debug payload
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model PitchDraft {
+  id                      String    @id @default(auto()) @map("_id") @db.ObjectId
+  leadId                  String    @db.ObjectId
+  lead                    Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  recommendedService      String
+  suggestedOffer          String
+  pricePoint              String?   // e.g. "₹4,999"
+  turnaroundDays          Int       @default(2)
+  openingMessage          String
+  openingMessageHinglish  String?
+  followUpMessage         String
+  followUpMessageHinglish String?
+  demoUrl                 String?
+  likelyObjections        String?   // JSON string of { objection, response }[]
+  channel                 String    @default("WHATSAPP")
+  status                  String    @default("DRAFT") // DRAFT, APPROVED, OPENED_IN_WHATSAPP, SKIPPED
+  dispatchedAt            DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+}
+
+model Interaction {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  leadId    String   @db.ObjectId
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String   // WHATSAPP_OPENED, CALL_MADE, NOTE, REPLY_RECEIVED, STATUS_CHANGE
+  content   String
+  createdAt DateTime @default(now())
+}

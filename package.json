@@ -11,7 +11,11 @@
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
     "seed": "npx tsx scripts/seed-leads.ts",
-    "audit-leads": "npx tsx scripts/run-audit.ts"
+    "audit-leads": "npx tsx scripts/run-audit.ts",
+    "use:mongo": "cp prisma/schema.mongo.prisma prisma/schema.prisma && prisma generate",
+    "use:sqlite": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && prisma generate && prisma db push",
+    "harvest-30": "npx tsx scripts/harvest-daily-leads.ts",
+    "daily-outreach": "npx tsx scripts/daily-auto-outreach.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.21.1",

@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { auditBusinessWebsite } from "@/lib/auditor";
 import { calculateLeadScore } from "@/lib/scorer";
 import { generatePitchDraft } from "@/lib/pitch-generator";
-import { discoverViaGooglePlaces } from "@/lib/discovery";
+import {
+  discoverViaGooglePlaces,
+  discoverViaOpenStreetMap,
+  OpenStreetMapCategory,
+} from "@/lib/discovery";
 
 export async function getDashboardData() {
   const leads = await prisma.lead.findMany({
@@ -83,7 +87,7 @@ export async function markWhatsAppOpened(leadId: string, pitchId: string) {
     data: {
       leadId,
       type: "WHATSAPP_OPENED",
-      content: "Founder opened personalized WhatsApp draft in WhatsApp Web / App.",
+      content: "Founder dispatched personalized pitch via WhatsApp Web / App.",
     },
   });
 
@@ -189,7 +193,10 @@ export async function quickAddLead(data: {
       pricePoint: pitch.pricePoint,
       turnaroundDays: pitch.turnaroundDays,
       openingMessage: pitch.openingMessage,
+      openingMessageHinglish: pitch.openingMessageHinglish,
       followUpMessage: pitch.followUpMessage,
+      followUpMessageHinglish: pitch.followUpMessageHinglish,
+      demoUrl: pitch.demoUrl,
       likelyObjections: JSON.stringify(pitch.likelyObjections),
       status: "DRAFT",
     },
@@ -199,49 +206,44 @@ export async function quickAddLead(data: {
   return lead;
 }
 
-export async function discoverGooglePlacesAction(
-  searchQuery: string,
+/**
+ * 100% Free Daily Lead Discovery & Outreach Auto-Preparation
+ * Discovers 30-40 fresh businesses from OpenStreetMap, audits websites,
+ * generates Hinglish & English pitches, and loads them into today's queue!
+ */
+export async function discoverFreeLeadsAction(
   city: string,
-  niche: string,
-  customApiKey?: string
+  category: OpenStreetMapCategory = "all",
+  targetCount: number = 35
 ) {
-  const apiKey = customApiKey?.trim() || process.env.GOOGLE_API_KEY?.trim();
-
-  if (!apiKey) {
-    throw new Error(
-      "Google Places API Key is required. Please provide it in the input or save GOOGLE_API_KEY in your .env file."
-    );
-  }
-
-  const places = await discoverViaGooglePlaces(searchQuery, city, niche, apiKey);
-
+  const businesses = await discoverViaOpenStreetMap(city, category, targetCount);
   let newCount = 0;
-  for (const p of places) {
+
+  for (const b of businesses) {
     const existing = await prisma.lead.findFirst({
-      where: { name: p.name, city: p.city },
+      where: { name: b.name, city: b.city },
     });
 
     if (!existing) {
       const lead = await prisma.lead.create({
         data: {
-          name: p.name,
-          category: p.category,
-          niche: p.niche,
-          address: p.address,
-          city: p.city,
-          area: p.area,
-          phone: p.phone,
-          whatsappPhone: p.whatsappPhone,
-          websiteUrl: p.websiteUrl,
-          googleMapsUrl: p.googleMapsUrl,
-          rating: p.rating,
-          reviewCount: p.reviewCount,
-          source: p.source,
+          name: b.name,
+          category: b.category,
+          niche: b.niche,
+          address: b.address,
+          city: b.city,
+          area: b.area,
+          phone: b.phone,
+          whatsappPhone: b.whatsappPhone,
+          websiteUrl: b.websiteUrl,
+          googleMapsUrl: b.googleMapsUrl,
+          rating: b.rating,
+          reviewCount: b.reviewCount,
+          source: b.source,
           status: "DISCOVERED",
         },
       });
 
-      // Audit and score
       const auditResult = await auditBusinessWebsite(lead.websiteUrl, lead.name, lead.category);
 
       await prisma.audit.create({
@@ -288,7 +290,118 @@ export async function discoverGooglePlacesAction(
           pricePoint: pitch.pricePoint,
           turnaroundDays: pitch.turnaroundDays,
           openingMessage: pitch.openingMessage,
+          openingMessageHinglish: pitch.openingMessageHinglish,
           followUpMessage: pitch.followUpMessage,
+          followUpMessageHinglish: pitch.followUpMessageHinglish,
+          demoUrl: pitch.demoUrl,
+          likelyObjections: JSON.stringify(pitch.likelyObjections),
+          status: "DRAFT",
+        },
+      });
+
+      newCount++;
+    }
+  }
+
+  revalidatePath("/");
+  return {
+    totalFound: businesses.length,
+    newImported: newCount,
+  };
+}
+
+export async function discoverGooglePlacesAction(
+  searchQuery: string,
+  city: string,
+  niche: string,
+  customApiKey?: string
+) {
+  const apiKey = customApiKey?.trim() || process.env.GOOGLE_API_KEY?.trim();
+
+  if (!apiKey) {
+    throw new Error(
+      "Google Places API Key is required. Please provide it in the input or save GOOGLE_API_KEY in your .env file."
+    );
+  }
+
+  const places = await discoverViaGooglePlaces(searchQuery, city, niche, apiKey);
+
+  let newCount = 0;
+  for (const p of places) {
+    const existing = await prisma.lead.findFirst({
+      where: { name: p.name, city: p.city },
+    });
+
+    if (!existing) {
+      const lead = await prisma.lead.create({
+        data: {
+          name: p.name,
+          category: p.category,
+          niche: p.niche,
+          address: p.address,
+          city: p.city,
+          area: p.area,
+          phone: p.phone,
+          whatsappPhone: p.whatsappPhone,
+          websiteUrl: p.websiteUrl,
+          googleMapsUrl: p.googleMapsUrl,
+          rating: p.rating,
+          reviewCount: p.reviewCount,
+          source: p.source,
+          status: "DISCOVERED",
+        },
+      });
+
+      const auditResult = await auditBusinessWebsite(lead.websiteUrl, lead.name, lead.category);
+
+      await prisma.audit.create({
+        data: {
+          leadId: lead.id,
+          hasWebsite: auditResult.hasWebsite,
+          isAccessible: auditResult.isAccessible,
+          statusCode: auditResult.statusCode,
+          loadTimeMs: auditResult.loadTimeMs,
+          isMobileResponsive: auditResult.isMobileResponsive,
+          hasSsl: auditResult.hasSsl,
+          hasMetaTags: auditResult.hasMetaTags,
+          title: auditResult.title,
+          metaDescription: auditResult.metaDescription,
+          hasOnlineOrdering: auditResult.hasOnlineOrdering,
+          hasBookingSystem: auditResult.hasBookingSystem,
+          hasWhatsAppWidget: auditResult.hasWhatsAppWidget,
+          hasSocialLinks: auditResult.hasSocialLinks,
+          socialLinks: JSON.stringify(auditResult.socialLinks),
+          identifiedIssues: JSON.stringify(auditResult.identifiedIssues),
+          opportunities: JSON.stringify(auditResult.opportunities),
+          auditSummary: auditResult.auditSummary,
+        },
+      });
+
+      const scoreOutput = calculateLeadScore(lead, auditResult);
+      const pitch = await generatePitchDraft(lead, auditResult);
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          leadScore: scoreOutput.totalScore,
+          scoreReason: scoreOutput.scoreReason,
+          scoreBreakdown: JSON.stringify(scoreOutput.breakdown),
+          status: "OUTREACH_READY",
+        },
+      });
+
+      await prisma.pitchDraft.create({
+        data: {
+          leadId: lead.id,
+          recommendedService: pitch.recommendedService,
+          suggestedOffer: pitch.suggestedOffer,
+          pricePoint: pitch.pricePoint,
+          turnaroundDays: pitch.turnaroundDays,
+          openingMessage: pitch.openingMessage,
+          openingMessageHinglish: pitch.openingMessageHinglish,
+          followUpMessage: pitch.followUpMessage,
+          followUpMessageHinglish: pitch.followUpMessageHinglish,
+          demoUrl: pitch.demoUrl,
           likelyObjections: JSON.stringify(pitch.likelyObjections),
           status: "DRAFT",
         },
@@ -382,7 +495,10 @@ export async function reAuditLead(leadId: string) {
         pricePoint: pitch.pricePoint,
         turnaroundDays: pitch.turnaroundDays,
         openingMessage: pitch.openingMessage,
+        openingMessageHinglish: pitch.openingMessageHinglish,
         followUpMessage: pitch.followUpMessage,
+        followUpMessageHinglish: pitch.followUpMessageHinglish,
+        demoUrl: pitch.demoUrl,
         likelyObjections: JSON.stringify(pitch.likelyObjections),
       },
     });
